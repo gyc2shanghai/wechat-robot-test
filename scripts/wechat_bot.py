@@ -6,6 +6,50 @@ from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
 windll.user32.SetProcessDPIAware()
 
+# ===================== 核心配置（根据你的实际情况修改） =====================
+# 1. 微信窗口标题关键词
+WECHAT_WINDOW_TITLE_KEY = "微信"
+# 2. 特征像素点（用之前的工具获取的坐标，替换成你的）
+FEATURE_PIXELS = [(300, 600), (400, 700), (200, 500)]  # 相对微信窗口的偏移坐标
+# 3. 目标关键词列表（从你的文档中提取）
+TARGET_KEYWORDS = ["我的金币", "金币余额", "打工", "我要打工", "抢劫", "买彩票"]
+# 4. 过滤配置
+MAX_MESSAGE_LENGTH_PIXEL = 80  # 消息最大高度（像素），超过则判定为过长消息
+MAX_TEXT_LENGTH = 20  # 消息最大文字长度，超过则过滤
+COLOR_DIFF_THRESHOLD = 5  # 像素颜色差值阈值
+NON_TEXT_COLOR_THRESHOLD = 10  # 非文字内容的颜色混乱度阈值
+
+# ===================== 全局变量 =====================
+LAST_PIXEL_COLORS = []  # 上一次的特征像素颜色
+GLOBAL_WECHAT_RECT = None  # 微信窗口坐标 (左, 上, 右, 下)
+GLOBAL_WECHAT_HANDLE = None
+
+
+def get_wechat_handle_once():
+    """获取微信句柄（全局只初始化1次，异常时重新获取）"""
+    global GLOBAL_WECHAT_HANDLE, GLOBAL_WECHAT_RECT
+    
+    # 如果已有有效句柄，直接返回
+    if GLOBAL_WECHAT_HANDLE and win32gui.IsWindow(GLOBAL_WECHAT_HANDLE):
+        return GLOBAL_WECHAT_HANDLE
+    
+    # 重新获取句柄
+    def callback(handle, extra):
+        if win32gui.GetWindowText(handle).find("微信") != -1:
+            extra.append(handle)
+        return True
+    handles = []
+    win32gui.EnumWindows(callback, handles)
+    
+    if handles:
+        GLOBAL_WECHAT_HANDLE = handles[0]
+        GLOBAL_WECHAT_RECT = win32gui.GetWindowRect(GLOBAL_WECHAT_HANDLE)
+        print(f"✅ 重新获取微信句柄：{GLOBAL_WECHAT_HANDLE}")
+        return GLOBAL_WECHAT_HANDLE
+    else:
+        print("❌ 未找到微信窗口")
+        return None
+
 def find_wechat():
     """
     查找微信主窗口句柄
@@ -23,6 +67,86 @@ def find_wechat():
     win32gui.EnumWindows(cb, None)
     return hwnd
 
+def get_pixel_color(hwnd, x, y):
+    """读取指定窗口中相对坐标(x, y)处的像素颜色（低消耗）"""
+    hdc = win32gui.GetDC(hwnd)  # 使用窗口句柄获取DC
+    color = win32gui.GetPixel(hdc, x, y)  # 直接使用窗口相对坐标
+    win32gui.ReleaseDC(hwnd, hdc)  # 释放窗口DC
+    # 解析为RGB
+    b = color & 0xFF
+    g = (color >> 8) & 0xFF
+    r = (color >> 16) & 0xFF
+    return (r, g, b)
+
+def get_wechat_window_rect():
+    """
+    获取微信窗口的坐标和大小
+    
+    返回:
+        tuple: 包含窗口坐标和大小的元组 (左, 上, 右, 下)
+        None: 如果未找到微信窗口则返回None
+    """
+    # 查找微信窗口句柄
+    hwnd = find_wechat()
+    if not hwnd:
+        print("未找到微信窗口")
+        return None
+    
+    # 检查微信窗口是否可见，若不可见则恢复显示
+    if not win32gui.IsWindowVisible(hwnd):
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        
+    # 将微信窗口设置为前台窗口（激活窗口）
+    win32gui.SetForegroundWindow(hwnd)
+    # 等待0.5秒，确保窗口有足够时间响应激活操作
+    time.sleep(0.5)  # 给窗口一些时间来响应
+    
+    # 获取窗口坐标和大小
+    rect = win32gui.GetWindowRect(hwnd)
+    print(f"微信窗口坐标: 左={rect[0]}, 上={rect[1]}, 右={rect[2]}, 下={rect[3]}")
+    print(f"窗口宽度: {rect[2] - rect[0]}, 窗口高度: {rect[3] - rect[1]}")
+    
+    return rect
+
+# ==========================
+# 监听消息模块
+# ==========================
+def check_pixel_change():
+    """检测特征像素点是否变化"""
+    global WECHAT_WINDOW_RECT, LAST_PIXEL_COLORS
+    
+    # 获取微信窗口
+    wechat_handle = find_wechat()
+    if not wechat_handle:
+        print("⚠️ 未找到微信窗口")
+        return False
+    WECHAT_WINDOW_RECT = get_wechat_window_rect(wechat_handle)
+    
+    # 读取特征像素点颜色
+    current_colors = []
+    for (dx, dy) in FEATURE_PIXELS:
+        x = WECHAT_WINDOW_RECT[0] + dx
+        y = WECHAT_WINDOW_RECT[1] + dy
+        current_colors.append(get_pixel_color(x, y))
+    
+    # 首次初始化
+    if not LAST_PIXEL_COLORS:
+        LAST_PIXEL_COLORS = current_colors
+        return False
+    
+    # 判断像素是否变化
+    has_change = False
+    for i in range(len(current_colors)):
+        r1, g1, b1 = LAST_PIXEL_COLORS[i]
+        r2, g2, b2 = current_colors[i]
+        diff = abs(r1-r2) + abs(g1-g2) + abs(b1-b2)
+        if diff > COLOR_DIFF_THRESHOLD:
+            has_change = True
+            break
+    
+    LAST_PIXEL_COLORS = current_colors
+    return has_change
+
 # ==========================
 # 发送消息模块
 # ==========================
@@ -33,22 +157,7 @@ def send_msg(text):
         text: 要发送的消息文本
     异常:
         当未找到微信窗口时抛出异常
-    """
-    # 查找微信主窗口句柄
-    hwnd = find_wechat()
-    # 如果未找到微信窗口，抛出异常
-    if not hwnd: 
-        raise Exception("未找到微信窗口")
-    
-    # 检查微信窗口是否可见，若不可见则恢复显示
-    if not win32gui.IsWindowVisible(hwnd):
-        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-    
-    # 将微信窗口设置为前台窗口（激活窗口）
-    win32gui.SetForegroundWindow(hwnd)
-    # 等待0.5秒，确保窗口有足够时间响应激活操作
-    time.sleep(0.5)  # 给窗口一些时间来响应
-    
+    """   
     # 打开剪贴板
     win32clipboard.OpenClipboard()
     # 清空剪贴板内容
@@ -78,25 +187,8 @@ def capture_chat_screenshot():
     返回:
         str: 截图保存路径，如果失败则返回错误信息
     """
-    try:
-        # 查找微信主窗口句柄
-        hwnd = find_wechat()
-        if not hwnd:
-            return "未找到微信窗口"
-        
-        # 检查微信窗口是否可见，若不可见则恢复显示
-        if not win32gui.IsWindowVisible(hwnd):
-            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        
-        # 将微信窗口设置为前台窗口（激活窗口）
-        win32gui.SetForegroundWindow(hwnd)
-        # 等待0.5秒，确保窗口有足够时间响应激活操作
-        time.sleep(0.5)  # 给窗口一些时间来响应
-        
-        # 获取微信窗口位置和大小
-        left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-        print(f"微信窗口坐标: {left}, {top}, {right}, {bottom}")
-            
+    try:    
+        left, top, right, bottom = get_wechat_window_rect()                 
         # 调整聊天区域的坐标（根据实际微信界面调整这些参数）
         chat_left_offset = 440      # 左侧边距
         chat_top_offset = 325         # 顶部边距（标题栏和菜单栏高度）
@@ -161,6 +253,9 @@ def get_wechat_chat_msg_trocr():
     except Exception as e:
         # 返回包含错误信息的字符串
         return f"TrOCR识别聊天内容失败: {str(e)}"
+
+
+
 
 
 if __name__ == "__main__":
