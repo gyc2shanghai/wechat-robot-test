@@ -1,0 +1,1 @@
+python ./scripts/app.py --cust_data_init_weights_path hand-write --test_img chat_screenshot.png
