@@ -1,1 +1,11 @@
 python ./scripts/app.py --cust_data_init_weights_path hand-write --test_img chat_screenshot.png
+python ./scripts/app.py --cust_data_init_weights_path hand-write --test_img test.png
+
+
+
+pip install  onnx onnxruntime 
+
+
+pip uninstall onnx -y onnxruntime -y onnxscript -y
+# 同时卸载onnx、onnxruntime、onnxscript（用空格分隔包名）
+pip uninstall onnx onnxruntime onnxscript -y
