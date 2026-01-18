@@ -11,3 +11,38 @@ hand-write/vocab.json
 doc/PyAutoGUI 与 PyWin32：轻量化像素检测的完美搭配.pdf
 chat_screenshot.png
 scripts/__pycache__/dataset.cpython-312.pyc
+cust-data/train/0.png
+cust-data/train/1.png
+cust-data/train/2.png
+cust-data/train/3.png
+cust-data/train/4.png
+cust-data/train/5.png
+cust-data/train/6.png
+cust-data/train/7.png
+cust-data/train/8.png
+cust-data/train/9.png
+cust-data/train/10.png
+cust-data/train/11.png
+cust-data/train/12.png
+cust-data/train/chat_0.txt
+cust-data/train/chat_1.txt
+cust-data/train/chat_2.txt
+cust-data/train/chat_3.txt
+cust-data/train/chat_4.txt
+cust-data/train/chat_5.txt
+cust-data/train/chat_6.txt
+cust-data/train/chat_7.txt
+cust-data/train/chat_8.txt
+cust-data/train/chat_9.txt
+cust-data/train/chat_10.txt
+cust-data/train/chat_11.txt
+cust-data/train/chat_12.txt
+weights/config.json
+weights/merges.txt
+weights/preprocessor_config.json
+weights/pytorch_model.bin
+weights/special_tokens_map.json
+weights/tokenizer_config.json
+weights/vocab.json
+doc/TroCR 与 Handwrite 模型：中文手写微调详解.pdf
+scripts/import os.py

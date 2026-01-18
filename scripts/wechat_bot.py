@@ -50,22 +50,7 @@ def get_wechat_handle_once():
         print("❌ 未找到微信窗口")
         return None
 
-def find_wechat():
-    """
-    查找微信主窗口句柄
-    
-    返回:
-        int: 微信窗口句柄，如果未找到则返回None
-    """
-    hwnd = None
-    def cb(handle, _):
-        nonlocal hwnd
-        if "微信" in win32gui.GetWindowText(handle):
-            hwnd = handle
-            return False
-        return True
-    win32gui.EnumWindows(cb, None)
-    return hwnd
+
 
 def get_pixel_color(hwnd, x, y):
     """读取指定窗口中相对坐标(x, y)处的像素颜色（低消耗）"""
@@ -78,55 +63,28 @@ def get_pixel_color(hwnd, x, y):
     r = (color >> 16) & 0xFF
     return (r, g, b)
 
-def get_wechat_window_rect():
-    """
-    获取微信窗口的坐标和大小
-    
-    返回:
-        tuple: 包含窗口坐标和大小的元组 (左, 上, 右, 下)
-        None: 如果未找到微信窗口则返回None
-    """
-    # 查找微信窗口句柄
-    hwnd = find_wechat()
-    if not hwnd:
-        print("未找到微信窗口")
-        return None
-    
-    # 检查微信窗口是否可见，若不可见则恢复显示
-    if not win32gui.IsWindowVisible(hwnd):
-        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        
-    # 将微信窗口设置为前台窗口（激活窗口）
-    win32gui.SetForegroundWindow(hwnd)
-    # 等待0.5秒，确保窗口有足够时间响应激活操作
-    time.sleep(0.5)  # 给窗口一些时间来响应
-    
-    # 获取窗口坐标和大小
-    rect = win32gui.GetWindowRect(hwnd)
-    print(f"微信窗口坐标: 左={rect[0]}, 上={rect[1]}, 右={rect[2]}, 下={rect[3]}")
-    print(f"窗口宽度: {rect[2] - rect[0]}, 窗口高度: {rect[3] - rect[1]}")
-    
-    return rect
-
 # ==========================
 # 监听消息模块
 # ==========================
 def check_pixel_change():
     """检测特征像素点是否变化"""
-    global WECHAT_WINDOW_RECT, LAST_PIXEL_COLORS
-    
+    #global GLOBAL_WECHAT_RECT, LAST_PIXEL_COLORS
+    if not GLOBAL_WECHAT_HANDLE:
+        return
+    if not GLOBAL_WECHAT_RECT:
+        return 
     # 获取微信窗口
     wechat_handle = find_wechat()
     if not wechat_handle:
         print("⚠️ 未找到微信窗口")
         return False
-    WECHAT_WINDOW_RECT = get_wechat_window_rect(wechat_handle)
+    #GLOBAL_WECHAT_RECT = get_wechat_window_rect(wechat_handle)
     
     # 读取特征像素点颜色
     current_colors = []
     for (dx, dy) in FEATURE_PIXELS:
-        x = WECHAT_WINDOW_RECT[0] + dx
-        y = WECHAT_WINDOW_RECT[1] + dy
+        x = GLOBAL_WECHAT_RECT[0] + dx
+        y = GLOBAL_WECHAT_RECT[1] + dy
         current_colors.append(get_pixel_color(x, y))
     
     # 首次初始化
@@ -157,7 +115,10 @@ def send_msg(text):
         text: 要发送的消息文本
     异常:
         当未找到微信窗口时抛出异常
-    """   
+    """  
+    if not GLOBAL_WECHAT_HANDLE:
+        return
+
     # 打开剪贴板
     win32clipboard.OpenClipboard()
     # 清空剪贴板内容
@@ -187,8 +148,10 @@ def capture_chat_screenshot():
     返回:
         str: 截图保存路径，如果失败则返回错误信息
     """
-    try:    
-        left, top, right, bottom = get_wechat_window_rect()                 
+    try:  
+        if not GLOBAL_WECHAT_RECT:
+            return  
+        left, top, right, bottom = GLOBAL_WECHAT_RECT                
         # 调整聊天区域的坐标（根据实际微信界面调整这些参数）
         chat_left_offset = 440      # 左侧边距
         chat_top_offset = 325         # 顶部边距（标题栏和菜单栏高度）
@@ -241,7 +204,7 @@ def get_wechat_chat_msg_trocr():
         pixel_values = processor(images=image, return_tensors="pt").pixel_values
         
         # 将预处理后的图像输入模型，生成文本序列的ID
-        generated_ids = model.generate(pixel_values)
+        generated_ids = model.generate(pixel_values,min_length=5)
         
         # 将生成的ID转换为可读文本，并跳过特殊标记
         chat_content = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
@@ -254,12 +217,17 @@ def get_wechat_chat_msg_trocr():
         # 返回包含错误信息的字符串
         return f"TrOCR识别聊天内容失败: {str(e)}"
 
-
-
-
-
 if __name__ == "__main__":
     try:
+        get_wechat_handle_once()
+        # 检查微信窗口是否可见，若不可见则恢复显示
+        if not win32gui.IsWindowVisible(GLOBAL_WECHAT_HANDLE):
+            win32gui.ShowWindow(GLOBAL_WECHAT_HANDLE, win32con.SW_RESTORE)        
+        # 将微信窗口设置为前台窗口（激活窗口）
+        win32gui.SetForegroundWindow(GLOBAL_WECHAT_HANDLE)
+        # 等待0.5秒，确保窗口有足够时间响应激活操作
+        time.sleep(0.5) 
+         # 给窗口一些时间来响应
         # 捕获聊天区域截图
         screenshot_path = capture_chat_screenshot()
         print(f"截图保存路径: {screenshot_path}")
@@ -270,8 +238,8 @@ if __name__ == "__main__":
         processor = TrOCRProcessor.from_pretrained(model_path)
         model = VisionEncoderDecoderModel.from_pretrained(model_path)
         
-        #chat_msg = get_wechat_chat_msg_trocr()  
-        #print(chat_msg)
+        chat_msg = get_wechat_chat_msg_trocr()  
+        print(chat_msg)
         
         # 发送测试消息
         #send_msg("我的金币")
